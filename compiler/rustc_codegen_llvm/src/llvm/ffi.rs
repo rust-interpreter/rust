@@ -1000,6 +1000,7 @@ extern "C" {
     pub fn LLVMModuleCreateWithNameInContext(ModuleID: *const c_char, C: &Context) -> &Module;
     pub fn LLVMGetModuleContext(M: &Module) -> &Context;
     pub fn LLVMCloneModule(M: &Module) -> &Module;
+    pub fn LLVMDumpModule(M: &Module);
 
     /// Data layout. See Module::getDataLayout.
     pub fn LLVMGetDataLayoutStr(M: &Module) -> *const c_char;
@@ -2491,4 +2492,10 @@ extern "C" {
         callback: GetSymbolsCallback,
         error_callback: GetSymbolsErrorCallback,
     ) -> *mut c_void;
+    
+    pub fn LLVMRustAddGlobalCtors(
+        C: &Context,
+        M: &Module,
+        Fn: &Value,
+    );
 }

@@ -28,8 +28,10 @@ use rustc_codegen_ssa::{ModuleCodegen, ModuleKind};
 use rustc_data_structures::small_c_str::SmallCStr;
 use rustc_middle::dep_graph;
 use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrs;
-use rustc_middle::mir::mono::{Linkage, Visibility};
-use rustc_middle::ty::TyCtxt;
+use rustc_middle::mir::Body;
+use rustc_span::def_id::DefId;
+use rustc_middle::mir::mono::{Linkage, Visibility, MonoItem, CodegenUnit};
+use rustc_middle::ty::{TyCtxt, Instance};
 use rustc_session::config::DebugInfo;
 use rustc_span::symbol::Symbol;
 use rustc_target::spec::SanitizerSet;
@@ -55,6 +57,42 @@ impl<'ll> Iterator for ValueIter<'ll> {
 
 pub fn iter_globals(llmod: &llvm::Module) -> ValueIter<'_> {
     unsafe { ValueIter { cur: llvm::LLVMGetFirstGlobal(llmod), step: llvm::LLVMGetNextGlobal } }
+}
+
+// #[cfg(feature="interpreter")]
+pub fn compile_execution_unit<'tcx>(tcx: TyCtxt<'tcx>, def_id: DefId) -> ModuleCodegen<ModuleLlvm>{
+    let symbol = tcx.item_name(def_id);
+
+    let instance = Instance::mono(tcx, def_id);
+    let mono = MonoItem::Fn(instance);
+
+    let mut cgu = CodegenUnit::new(symbol);
+    let (linkage, visibility) = (Linkage::Common, Visibility::Default);
+    cgu.items_mut().insert(mono, (linkage, visibility));
+    
+    let cgu = tcx.arena.alloc(cgu);
+    
+    let llvm_module = ModuleLlvm::new(tcx, symbol.as_str());
+    {
+        let cx = CodegenCx::new(tcx, cgu, &llvm_module);
+        let mono_items = cx.codegen_unit.items_in_deterministic_order(tcx);
+        for &(mono_item, (linkage, visibility)) in &mono_items {
+            mono_item.predefine::<Builder<'_, '_, '_>>(&cx, linkage, visibility);
+        }
+
+        for &(mono_item, _) in &mono_items {
+            mono_item.define::<Builder<'_, '_, '_>>(&cx);
+        }
+        
+        cx.add_ctors(instance);
+    }
+    
+    llvm_module.print();
+    ModuleCodegen {
+        name: symbol.as_str().to_owned(),
+        module_llvm: llvm_module,
+        kind: ModuleKind::Regular,
+    }
 }
 
 pub fn compile_codegen_unit(tcx: TyCtxt<'_>, cgu_name: Symbol) -> (ModuleCodegen<ModuleLlvm>, u64) {

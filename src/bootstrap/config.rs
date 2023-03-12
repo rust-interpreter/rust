@@ -204,6 +204,7 @@ pub struct Config {
     pub print_step_timings: bool,
     pub print_step_rusage: bool,
     pub missing_tools: bool,
+    pub interpreter: bool,
 
     // Fallback musl-root for all targets
     pub musl_root: Option<PathBuf>,
@@ -761,6 +762,7 @@ define_config! {
         thin_lto_import_instr_limit: Option<u32> = "thin-lto-import-instr-limit",
         remap_debuginfo: Option<bool> = "remap-debuginfo",
         jemalloc: Option<bool> = "jemalloc",
+        interpreter: Option<bool> = "interpreter",
         test_compare_mode: Option<bool> = "test-compare-mode",
         llvm_libunwind: Option<String> = "llvm-libunwind",
         control_flow_guard: Option<bool> = "control-flow-guard",
@@ -1102,6 +1104,7 @@ impl Config {
             set(&mut config.codegen_tests, rust.codegen_tests);
             set(&mut config.rust_rpath, rust.rpath);
             set(&mut config.jemalloc, rust.jemalloc);
+            set(&mut config.interpreter, rust.interpreter);
             set(&mut config.test_compare_mode, rust.test_compare_mode);
             set(&mut config.backtrace, rust.backtrace);
             set(&mut config.channel, rust.channel);

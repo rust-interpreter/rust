@@ -1996,3 +1996,39 @@ extern "C" int32_t LLVMRustGetElementTypeArgIndex(LLVMValueRef CallSite) {
 extern "C" bool LLVMRustIsBitcode(char *ptr, size_t len) {
   return identify_magic(StringRef(ptr, len)) == file_magic::bitcode;
 }
+
+extern "C" void
+LLVMRustAddGlobalCtors(LLVMContextRef C, LLVMModuleRef M, LLVMValueRef Fn) {
+  auto CtorFnTy = unwrap<FunctionType>(LLVMTypeOf(Fn));
+  auto CtorPtrFnTy = PointerType::get(
+    CtorFnTy,
+    unwrap(M)->getDataLayout().getProgramAddressSpace()
+  );
+  
+  auto Ctx = unwrap(C);
+  auto VoidPtrTy = PointerType::get(
+    Type::getVoidTy(*Ctx),
+    unwrap(M)->getDataLayout().getProgramAddressSpace()
+  );
+  
+  auto CtorTy = StructType::get(
+    Type::getInt32Ty(*Ctx),
+    CtorPtrFnTy,
+    VoidPtrTy
+  );
+  
+  Constant* Values[] = {
+    ConstantInt::get(Type::getInt32Ty(*Ctx), 65535),
+    ConstantExpr::getBitCast(unwrap<Constant>(Fn), CtorPtrFnTy),
+    ConstantPointerNull::get(VoidPtrTy),
+  };
+  
+  auto CtorsValue = ConstantStruct::get(
+    CtorTy,
+    Values
+  );
+  
+  auto Ctors = unwrap(M)->getOrInsertGlobal("llvm.global_ctors", CtorTy);
+  unwrap(M)->getGlobalVariable("llvm.global_ctors")->setLinkage(GlobalValue::LinkageTypes::AppendingLinkage);
+  unwrap(M)->getGlobalVariable("llvm.global_ctors")->setInitializer(CtorsValue);
+}

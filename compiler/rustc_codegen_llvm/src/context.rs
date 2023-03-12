@@ -454,6 +454,14 @@ impl<'ll, 'tcx> CodegenCx<'ll, 'tcx> {
             renamed_statics: Default::default(),
         }
     }
+    
+    pub fn add_ctors(&self, instance: Instance<'tcx>) {
+        if let Some(value) = self.instances.borrow().get(&instance) {
+            unsafe {
+                llvm::LLVMRustAddGlobalCtors(self.llcx, self.llmod, value);
+            }
+        }
+    }
 
     pub(crate) fn statics_to_rauw(&self) -> &RefCell<Vec<(&'ll Value, &'ll Value)>> {
         &self.statics_to_rauw

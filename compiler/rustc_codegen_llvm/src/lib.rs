@@ -58,7 +58,7 @@ mod abi;
 mod allocator;
 mod asm;
 mod attributes;
-mod base;
+pub mod base;
 mod builder;
 mod callee;
 mod common;
@@ -430,6 +430,12 @@ impl ModuleLlvm {
             };
 
             Ok(ModuleLlvm { llmod_raw, llcx, tm })
+        }
+    }
+    
+    pub fn print(&self) {
+        unsafe {
+            llvm::LLVMDumpModule(self.llmod());
         }
     }
 

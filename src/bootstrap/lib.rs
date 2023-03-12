@@ -740,6 +740,9 @@ impl Build {
         if self.config.llvm_enabled() || kind == Kind::Check {
             features.push("llvm");
         }
+        if self.config.interpreter {
+            features.push("interpreter");
+        }
         // keep in sync with `bootstrap/compile.rs:rustc_cargo_env`
         if self.config.rustc_parallel {
             features.push("rustc_use_parallel_compiler");
