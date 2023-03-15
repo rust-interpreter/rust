@@ -4,12 +4,17 @@
 //! and methods are represented as just a fn ptr and not a full
 //! closure.
 
+use std::ffi::CString;
+
 use crate::abi::FnAbiLlvmExt;
 use crate::attributes;
+use crate::builder::Builder;
 use crate::common;
 use crate::context::CodegenCx;
 use crate::llvm;
 use crate::value::Value;
+use llvm::LLVMSearchForAddressOfSymbol;
+use rustc_codegen_ssa::base::codegen_instance;
 use rustc_codegen_ssa::traits::*;
 
 use rustc_middle::ty::layout::{FnAbiOf, HasTyCtxt};
@@ -202,6 +207,16 @@ pub fn get_fn<'ll, 'tcx>(cx: &CodegenCx<'ll, 'tcx>, instance: Instance<'tcx>) ->
             if cx.should_assume_dso_local(llfn, true) {
                 llvm::LLVMRustSetDSOLocal(llfn, true);
             }
+        }
+        
+        if cx.sess().opts.unstable_opts.interpreter {
+            let addr = unsafe {
+                let name = CString::new(sym).unwrap();
+                LLVMSearchForAddressOfSymbol(name.as_ptr())
+            };
+            if addr.is_null() {
+                codegen_instance::<Builder<'_, '_, '_>>(cx, instance);
+            }    
         }
 
         llfn

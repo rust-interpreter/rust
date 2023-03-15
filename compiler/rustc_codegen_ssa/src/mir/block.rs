@@ -746,7 +746,18 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             _ => bug!("{} is not callable", callee.layout.ty),
         };
         let def = instance.map(|i| i.def);
-
+        
+        if self.cx.sess().opts.unstable_opts.interpreter {
+            if let Some(instance) = instance {
+                match instance.def {
+                    ty::InstanceDef::Intrinsic(_) => {},
+                    _ => {
+                        self.cx.get_fn(instance);
+                    }
+                }
+            }
+        }
+        
         if let Some(ty::InstanceDef::DropGlue(_, None)) = def {
             // Empty drop glue; a no-op.
             let target = target.unwrap();

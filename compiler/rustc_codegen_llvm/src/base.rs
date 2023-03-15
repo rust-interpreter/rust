@@ -13,7 +13,7 @@
 
 use super::ModuleLlvm;
 
-use crate::attributes;
+use crate::{attributes, allocator};
 use crate::builder::Builder;
 use crate::context::CodegenCx;
 use crate::llvm;
@@ -21,22 +21,25 @@ use crate::value::Value;
 
 use cstr::cstr;
 
-use rustc_codegen_ssa::base::maybe_create_entry_wrapper;
+use rustc_ast::expand::allocator::AllocatorKind;
+use rustc_codegen_ssa::base::{maybe_create_entry_wrapper, codegen_instance};
 use rustc_codegen_ssa::mono_item::MonoItemExt;
 use rustc_codegen_ssa::traits::*;
 use rustc_codegen_ssa::{ModuleCodegen, ModuleKind};
 use rustc_data_structures::small_c_str::SmallCStr;
-use rustc_middle::dep_graph;
+use rustc_hir::def_id::LOCAL_CRATE;
+use rustc_middle::{dep_graph, mir};
 use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrs;
 use rustc_middle::mir::Body;
 use rustc_span::def_id::DefId;
-use rustc_middle::mir::mono::{Linkage, Visibility, MonoItem, CodegenUnit};
-use rustc_middle::ty::{TyCtxt, Instance};
+use rustc_middle::mir::mono::{Linkage, Visibility, MonoItem, CodegenUnit, CodegenUnitNameBuilder};
+use rustc_middle::ty::{TyCtxt, Instance, InstanceDef, ParamEnv, TypeVisitableExt};
 use rustc_session::config::DebugInfo;
 use rustc_span::symbol::Symbol;
 use rustc_target::spec::SanitizerSet;
 
 use std::time::Instant;
+use std::ffi::{CStr, CString};
 
 pub struct ValueIter<'ll> {
     cur: Option<&'ll Value>,
@@ -57,6 +60,84 @@ impl<'ll> Iterator for ValueIter<'ll> {
 
 pub fn iter_globals(llmod: &llvm::Module) -> ValueIter<'_> {
     unsafe { ValueIter { cur: llvm::LLVMGetFirstGlobal(llmod), step: llvm::LLVMGetNextGlobal } }
+}
+
+struct CallVisitor<'tcx> {
+    tcx: TyCtxt<'tcx>,
+    callees: Vec<Instance<'tcx>>
+}
+
+impl<'tcx> CallVisitor<'tcx> {
+    pub fn new(tcx: TyCtxt<'tcx>) -> Self {
+        CallVisitor {
+            tcx,
+            callees: Vec::new(),
+        }
+    }
+}
+
+impl<'tcx> mir::visit::Visitor<'tcx> for CallVisitor<'tcx> {
+    fn visit_terminator(&mut self,terminator: &mir::Terminator<'tcx>,location:mir::Location,) {
+        match &terminator.kind {
+            mir::TerminatorKind::Call { func, args, destination, target, cleanup, from_hir_call, fn_span } => {
+                let (def_id, substs) = func.const_fn_def().unwrap();
+                dbg!(func, def_id, substs);
+                // let instance = Instance::mono(self.tcx, def_id);
+                // dbg!(instance.def);
+                if let Some(callee) = Instance::resolve(self.tcx, ParamEnv::reveal_all(), def_id, substs).unwrap() {
+                    dbg!(self.tcx.symbol_name(callee));
+                    match callee.def {
+                        InstanceDef::Intrinsic(..) => {},
+                        _ => self.callees.push(callee),
+                    }   
+                } else {
+                    let instance = Instance::new(def_id, substs);
+                    dbg!(self.tcx.symbol_name(instance));
+                    self.callees.push(instance);
+                }
+                // match callee.def {
+                    // InstanceDef::Intrinsic(..) => {},
+                    // _ => self.callees.push(callee),
+                // }    
+            },
+            _ => {
+                
+            }
+        }
+    }
+}
+
+pub fn codegen_instance_wrapper<'a, 'tcx>(cx: &'a CodegenCx<'_, 'tcx>, instance: Instance<'tcx>) {
+    codegen_instance::<Builder<'_, '_, '_>>(cx, instance);
+    
+    let mut visitor = CallVisitor::new(cx.tcx);
+    let body = cx.tcx.optimized_mir(instance.def_id());
+    mir::visit::Visitor::visit_body(&mut visitor, body);
+    
+    for callee in visitor.callees {
+        unsafe {
+            let name = cx.tcx.symbol_name(callee).name;
+            dbg!(name);
+            let name = CString::new(name).unwrap();
+            if !dbg!(llvm::LLVMSearchForAddressOfSymbol(name.as_ptr())).is_null() {
+                continue;
+            }
+        }
+
+        let callee = instance.subst_mir_and_normalize_erasing_regions(cx.tcx, ParamEnv::reveal_all(), callee);
+        // dbg!(callee.subst_mir_and_normalize_erasing_regions(cx.tcx, ParamEnv::reveal_all(), instance));
+        // dbg!(callee.polymorphize(cx.tcx));
+        dbg!(callee);
+        if callee != instance {
+            codegen_instance_wrapper(cx, callee);
+        }
+    }
+}
+
+pub fn load_library(path: std::path::PathBuf) {
+    unsafe {
+        dbg!(llvm::LLVMLoadLibraryPermanently(path.to_str().unwrap().as_ptr().cast()));
+    }
 }
 
 // #[cfg(feature="interpreter")]
@@ -85,9 +166,53 @@ pub fn compile_execution_unit<'tcx>(tcx: TyCtxt<'tcx>, def_id: DefId) -> ModuleC
         }
         
         cx.add_ctors(instance);
+        
+        // codegen_instance_wrapper(&cx, instance);
+        codegen_instance::<Builder<'_,'_,'_>>(&cx, instance);
+        // let instances = cx.instances.borrow().iter().map(|(i, _)| i).copied().collect::<Vec<_>>();
+        // for subrountine in instances {
+            // if subrountine == instance {
+                // continue;
+            // }
+            // 
+            // let name = tcx.symbol_name(subrountine);
+            // unsafe {
+                // dbg!(name.name);
+                // dbg!(llvm::LLVMSearchForAddressOfSymbol(CString::new(name.name).unwrap().as_ptr()));
+                // if !llvm::LLVMSearchForAddressOfSymbol(CString::new(name.name).unwrap().as_ptr()).is_null() {
+                    // continue;
+                // }
+            // }
+            // 
+            // println!("Codegen: {}", name.name);
+            // codegen_instance_wrapper(&cx, subrountine);
+        // }
+        
+        // llvm_module.print();
+        // dbg!(cx.instances);
+        let llmod = llvm_module.llmod();
+        unsafe {
+            let jit = llvm::LLVMRustInitializeLLJIT();
+            llvm::LLVMRustAddDynamicLibrarySearchGenerator(jit);
+            llvm::LLVMRustAddIRModule(jit, llmod);
+
+            // let cgu_name_builder = &mut CodegenUnitNameBuilder::new(tcx);
+            // let llmod_id = cgu_name_builder.build_cgu_name(LOCAL_CRATE, &["crate"], Some("allocator")).to_ident_string();
+            // let mut alloc_mod = ModuleLlvm::new(tcx, &llmod_id);
+            // allocator::codegen(
+                // tcx,
+                // &mut alloc_mod,
+                // &llmod_id,
+                // AllocatorKind::Global,
+                // AllocatorKind::Default,
+            // );
+            // llvm::LLVMRustAddIRModule(jit, alloc_mod.llmod());
+            // alloc_mod.print();
+
+            llvm::LLVMRustRunCtors(jit);
+        }
     }
     
-    llvm_module.print();
     ModuleCodegen {
         name: symbol.as_str().to_owned(),
         module_llvm: llvm_module,

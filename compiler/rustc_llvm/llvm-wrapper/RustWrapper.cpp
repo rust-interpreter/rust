@@ -1,4 +1,5 @@
 #include "LLVMWrapper.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DiagnosticHandler.h"
 #include "llvm/IR/DiagnosticInfo.h"
@@ -8,6 +9,8 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/IntrinsicsARM.h"
 #include "llvm/IR/Mangler.h"
+#include "llvm/ExecutionEngine/Orc/LLJIT.h"
+#include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
 #if LLVM_VERSION_GE(16, 0)
 #include "llvm/Support/ModRef.h"
 #endif
@@ -17,6 +20,7 @@
 #include "llvm/Pass.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/Support/Signals.h"
+#include "llvm-c/Support.h"
 #if LLVM_VERSION_LT(16, 0)
 #include "llvm/ADT/Optional.h"
 #endif
@@ -2028,7 +2032,58 @@ LLVMRustAddGlobalCtors(LLVMContextRef C, LLVMModuleRef M, LLVMValueRef Fn) {
     Values
   );
   
+  auto CtorsValuesTy = ArrayType::get(CtorTy, 1);
+  auto CtorsValues = ConstantArray::get(
+      CtorsValuesTy,
+      {CtorsValue}
+  );
+  
   auto Ctors = unwrap(M)->getOrInsertGlobal("llvm.global_ctors", CtorTy);
   unwrap(M)->getGlobalVariable("llvm.global_ctors")->setLinkage(GlobalValue::LinkageTypes::AppendingLinkage);
-  unwrap(M)->getGlobalVariable("llvm.global_ctors")->setInitializer(CtorsValue);
+  unwrap(M)->getGlobalVariable("llvm.global_ctors")->setInitializer(CtorsValues);
+}
+
+extern "C" orc::LLJIT*
+LLVMRustInitializeLLJIT() {
+  auto ExitOnErr = ExitOnError();
+  std::unique_ptr<orc::LLJIT> J = ExitOnErr(orc::LLJITBuilder().create());
+  return J.release();
+}
+
+extern "C" void
+LLVMRustAddIRModule(orc::LLJIT* J, LLVMModuleRef M) {
+  auto M_ = std::unique_ptr<Module>(unwrap(M));
+  auto C_ = std::make_unique<LLVMContext>();
+  auto TSM = orc::ThreadSafeModule(std::move(M_), std::move(C_));
+  auto Error = J->addIRModule(std::move(TSM));
+  if (Error) {
+    std::string errorString;
+    llvm::raw_string_ostream stream(errorString);
+    stream << Error;
+    stream.flush();
+    LLVMRustSetLastError(errorString.c_str());
+  }
+}
+
+extern "C" void
+LLVMRustRunCtors(orc::LLJIT* J) {
+  auto Error = J->initialize(J->getMainJITDylib());
+  if (Error) {
+    std::string errorString;
+    llvm::raw_string_ostream stream(errorString);
+    stream << Error;
+    stream.flush();
+    LLVMRustSetLastError(errorString.c_str());
+  }
+}
+
+extern "C" void
+LLVMRustAddDynamicLibrarySearchGenerator(orc::LLJIT *J)
+{
+  auto ExitOnErr = ExitOnError();
+  J->getMainJITDylib().addGenerator(
+    ExitOnErr(orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(
+      J->getDataLayout().getGlobalPrefix()
+    ))
+  );
 }

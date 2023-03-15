@@ -2,10 +2,12 @@ use crate::base;
 use crate::traits::*;
 use rustc_middle::mir;
 use rustc_middle::mir::interpret::ErrorHandled;
+use rustc_middle::mir::visit::Visitor;
 use rustc_middle::ty::layout::{FnAbiOf, HasTyCtxt, TyAndLayout};
 use rustc_middle::ty::{self, Instance, Ty, TyCtxt, TypeFoldable, TypeVisitableExt};
 use rustc_target::abi::call::{FnAbi, PassMode};
 
+use std::ffi::CString;
 use std::iter;
 
 use rustc_index::bit_set::BitSet;
@@ -142,7 +144,7 @@ impl<'a, 'tcx, V: CodegenObject> LocalRef<'tcx, V> {
     }
 }
 
-///////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////
 
 #[instrument(level = "debug", skip(cx))]
 pub fn codegen_mir<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(

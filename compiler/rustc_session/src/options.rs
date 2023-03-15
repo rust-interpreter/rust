@@ -1485,6 +1485,8 @@ options! {
          `=skip-entry`
          `=skip-exit`
          Multiple options can be combined with commas."),
+    interpreter: bool = (false, parse_bool, [TRACKED],
+        "interpreter."),
     keep_hygiene_data: bool = (false, parse_bool, [UNTRACKED],
         "keep hygiene data after analysis (default: no)"),
     layout_seed: Option<u64> = (None, parse_opt_number, [TRACKED],

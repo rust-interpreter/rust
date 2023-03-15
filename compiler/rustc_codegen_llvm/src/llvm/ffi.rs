@@ -625,6 +625,9 @@ extern "C" {
     pub type Value;
 }
 extern "C" {
+    pub type LLJIT;
+}
+extern "C" {
     pub type ConstantInt;
 }
 extern "C" {
@@ -2498,4 +2501,18 @@ extern "C" {
         M: &Module,
         Fn: &Value,
     );
+    
+    pub fn LLVMRustInitializeLLJIT() -> &'static LLJIT;
+    pub fn LLVMRustAddIRModule(
+        J: &LLJIT,
+        M: &Module,
+    );
+    pub fn LLVMRustRunCtors(
+        J: &LLJIT,
+    );
+    pub fn LLVMRustAddDynamicLibrarySearchGenerator(J: &LLJIT);
+    
+    pub fn LLVMLoadLibraryPermanently(Filename: *const c_char) -> Bool;
+    pub fn LLVMGetNamedFunction(M: &Module, Name: *const c_char) -> Option<&Value>;
+    pub fn LLVMSearchForAddressOfSymbol(Name: *const c_char) -> *mut c_void;
 }

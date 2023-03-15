@@ -27,7 +27,7 @@ use std::sync::Once;
 
 static INIT: Once = Once::new();
 
-pub(crate) fn init(sess: &Session) {
+pub fn init(sess: &Session) {
     unsafe {
         // Before we touch LLVM, make sure that multithreading is enabled.
         if llvm::LLVMIsMultithreaded() != 1 {
